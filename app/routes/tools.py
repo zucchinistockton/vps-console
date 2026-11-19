@@ -55,10 +55,15 @@ async def check_start(
     proxies: str = Form(""),
     proxy_scheme: str = Form("socks5"),
     use_probe: str = Form(""),
+    gfw: str = Form(""),
+    udp_ports: str = Form(""),
+    ipv6: str = Form(""),
+    cf_host: str = Form(""),
 ):
     db = request.app.state.db
     form = {"mode": mode, "host": host, "ssh_port": ssh_port, "ssh_user": ssh_user, "ports": ports,
-            "sni": sni, "domain": domain, "proxy_scheme": proxy_scheme}
+            "sni": sni, "domain": domain, "proxy_scheme": proxy_scheme, "udp_ports": udp_ports, "ipv6": ipv6,
+            "cf_host": cf_host}
     try:
         mode = "deep" if mode == "deep" else "quick"
         target = None
@@ -79,6 +84,10 @@ async def check_start(
             proxies=[line.strip() for line in proxies.splitlines() if line.strip()],
             proxy_scheme=proxy_scheme if proxy_scheme in ("socks5", "http") else "socks5",
             routes=target is not None,
+            gfw=bool(gfw),
+            udp_ports=v.ports(udp_ports, "udp_ports", limit=4),
+            ipv6=v.ipv6(ipv6),
+            cf_host=v.domain(cf_host, "cf_host"),
         )
         if not (host or opts.domain or opts.cf_token or opts.proxies):
             raise v.InvalidInput("host", "nothing_to_check")
@@ -98,7 +107,7 @@ async def check_start(
 
     public_inputs = {"mode": mode, "host": host, "ssh_port": ssh_port, "ssh_user": ssh_user, "ports": ports,
                      "sni": sni, "domain": domain, "proxy_count": len(opts.proxies), "has_cf": bool(opts.cf_token),
-                     "probe": bool(probe)}
+                     "probe": bool(probe), "gfw": bool(gfw), "udp_ports": udp_ports, "ipv6": ipv6, "cf_host": cf_host}
     job_id = await request.app.state.jobs.start("check", mode, target_label, public_inputs, work)
     return RedirectResponse(f"/jobs/{job_id}", status_code=303)
 

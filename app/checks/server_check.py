@@ -14,7 +14,7 @@ import ssl
 import time
 from dataclasses import dataclass, field
 
-from . import cloudflare, globalping, netinfo, reach, routes
+from . import cloudflare, gfw, globalping, netinfo, reach, routes
 from .assess import assess, score
 from .facts import FACTS_SCRIPT, parse_facts
 from .proxy import parse_proxy, test_proxy
@@ -32,6 +32,10 @@ class CheckOptions:
     proxy_scheme: str = "socks5"
     routes: bool = True
     globalping_token: str = field(default="", repr=False)
+    gfw: bool = True
+    udp_ports: list[int] = field(default_factory=list)
+    ipv6: str = ""
+    cf_host: str = ""
 
 
 async def tls_handshake(host: str, port: int, sni: str = "", timeout: float = 6) -> str:
@@ -152,6 +156,11 @@ async def run_server_check(target: SSHTarget | None, opts: CheckOptions, probe: 
             result["forward_route"] = forward
         result["links"] = reach.manual_links(ip, ports)
 
+    # 2b. GFW matrix: IPv4 ICMP / TCP / UDP, IPv6 TCP, Cloudflare relay, abroad vs China
+    if ip and opts.gfw and netinfo.is_public_ip(ip):
+        await progress("gfw")
+        result["gfw"] = await gfw_matrix(ip, ports, opts, probe, result)
+
     # 3. Cloudflare
     if opts.cf_token:
         await progress("cloudflare")
@@ -172,3 +181,41 @@ async def run_server_check(target: SSHTarget | None, opts: CheckOptions, probe: 
 
     result["duration_s"] = round(time.time() - started, 1)
     return result
+
+
+def _public_v6(values: list[str]) -> str:
+    for v in values:
+        try:
+            a = ipaddress.ip_address(v)
+        except ValueError:
+            continue
+        if a.version == 6 and a.is_global:
+            return v
+    return ""
+
+
+async def gfw_matrix(ip: str, ports: list[int], opts: CheckOptions, probe: SSHTarget | None, result: dict) -> dict:
+    v6 = opts.ipv6 or _public_v6(((result.get("facts") or {}).get("ips") or {}).get("ipv6", []))
+    if not v6 and opts.domain:
+        v6 = _public_v6(await cloudflare.resolve(opts.domain, "AAAA"))
+    params = {"ipv4": ip, "ipv6": v6, "tcp_ports": ports[:8], "udp_ports": opts.udp_ports[:4], "udp_probes": 20,
+              "cf_host": opts.cf_host, "speed": bool(opts.cf_host), "pings": 6}
+    abroad_task = asyncio.create_task(gfw.from_here(params))
+    china = None
+    probe_error = ""
+    if probe:
+        try:
+            pconn = await connect(probe)
+        except SSHError as exc:
+            probe_error = exc.code
+        else:
+            async with pconn:
+                china = await gfw.from_probe(pconn, params)
+    abroad = await abroad_task
+    gp6 = None
+    if v6 and ports and (china is None or not china.get("ipv6_capable")):
+        m = await globalping.measure(v6, port=ports[0], token=opts.globalping_token)
+        gp6 = {"ok": m.get("ok"), "port": ports[0], "results": m.get("results", []), "error": m.get("error"),
+               "reachable": globalping.reachable(m.get("results", [])) if m.get("ok") else None}
+    return {"params": params, "abroad": abroad, "china": china, "gp6": gp6, "probe_error": probe_error,
+            **gfw.matrix(abroad, china, gp6)}

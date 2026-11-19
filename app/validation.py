@@ -62,6 +62,20 @@ def ports(value: str, field: str = "ports", limit: int = 12) -> list[int]:
     return out
 
 
+def ipv6(value: str, field: str = "ipv6") -> str:
+    """Optional public IPv6 address of the target (for the IPv6 GFW test)."""
+    value = (value or "").strip().strip("[]")
+    if not value:
+        return ""
+    try:
+        addr = ipaddress.IPv6Address(value)
+    except ValueError as exc:
+        raise InvalidInput(field, "invalid_ip") from exc
+    if not is_allowed_ip(addr):
+        raise InvalidInput(field, "private_ip")
+    return str(addr)
+
+
 def username(value: str, field: str = "username") -> str:
     value = (value or "root").strip()
     if not _USER.match(value):
