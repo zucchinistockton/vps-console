@@ -143,6 +143,37 @@
 </section>
 {% endif %}
 
+{% if r.gfw %}{% set g = r.gfw %}
+<section class="panel">
+  <h2>{{ t('gfw.title') }}</h2>
+  {% if g.probe_error %}<p class="alert warn">{{ t('job.probe_error') }}: {{ t('ssh.' ~ g.probe_error) }}</p>{% endif %}
+  {% for a in g.advice %}<p class="verdict {{ 'ok' if a in ('advice.direct_ok',) else ('info' if a in ('advice.no_probe', 'advice.probe_no_python', 'advice.cf_slow') else 'bad') }}">{{ t(a) }}</p>{% endfor %}
+  <div class="scroll"><table class="tbl">
+    <thead><tr><th>{{ t('gfw.test') }}</th><th>{{ t('job.abroad') }}</th><th>{{ t('job.china') }}</th><th>{{ t('gfw.verdict') }}</th></tr></thead>
+    <tbody>
+    {% for row in g.rows %}
+      <tr>
+        <td><strong>{{ t('gfw.' ~ row.test) }}</strong>{% if row.port %} <span class="muted">:{{ row.port }}</span>{% endif %}{% if row.source == 'globalping' %} <span class="muted small">(Globalping)</span>{% endif %}</td>
+        {% for side in (row.abroad, row.china) %}
+        <td class="small">
+          {% if side is none %}–
+          {% elif row.test in ('icmp4', 'icmp6') %}{{ '✓' if side.ok else '✗' }}{% if side.avg %} {{ '%.0f'|format(side.avg) }} ms{% endif %}{% if side.loss is not none %}, {{ t('gfw.loss') }} {{ side.loss }}%{% endif %}
+          {% elif row.test in ('tcp4', 'tcp6') and row.source != 'globalping' or (row.test == 'tcp6' and loop.first) %}{% for p, r2 in (side or {}).items() %}{{ p }} {{ t('gfw.st_' ~ r2.state) }}{% if r2.ms %} {{ '%.0f'|format(r2.ms) }} ms{% endif %}<br>{% endfor %}
+          {% elif row.test == 'tcp6' %}{% for x in side.results %}{{ x.city }} · {{ x.network }}: {{ ('%.0f ms'|format(x.avg)) if x.avg else '–' }}, {{ t('gfw.loss') }} {{ x.loss }}%<br>{% endfor %}
+          {% elif row.test == 'udp4' %}{{ t('gfw.quic', replies=side.replies, sent=side.sent) }}{% if side.refused %} · {{ t('gfw.icmp_unreach') }}{% endif %}
+          {% elif row.test == 'cf' %}{% if side.error %}✗ {{ side.error }}{% else %}{{ side.colo }} ({{ side.loc }}) · {{ t('gfw.edge') }} {{ side.edge_status }} · {{ t('gfw.origin') }} {{ side.origin_status }} · TTFB {{ side.ttfb_ms }} ms{% if side.speed_kbps %} · {{ '%.1f'|format(side.speed_kbps / 1000) }} Mbit/s{% endif %}{% endif %}
+          {% endif %}
+        </td>
+        {% endfor %}
+        <td><span class="tag {{ 'ok' if row.verdict == 'ok' else ('warn' if row.verdict in ('lossy', 'inconclusive', 'unknown', 'not_tested') else 'bad') }}">{{ t('gfw.v_' ~ row.verdict, ports=(row.ports or [])|join(', '), loss=row.loss) }}</span></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  <p class="hint">{{ t('gfw.hint') }}</p>
+</section>
+{% endif %}
+
 {% if r.cloudflare %}{% set cf = r.cloudflare %}
 <section class="panel">
   <h2>Cloudflare</h2>

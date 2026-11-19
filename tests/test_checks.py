@@ -220,3 +220,64 @@ def test_exposed_services_and_docker_ufw():
     exposed = [x for x in found if x["code"] == "exposed_service"]
     assert [x["params"]["port"] for x in exposed] == [6379]
     assert any(x["code"] == "docker_bypasses_ufw" for x in found)
+
+
+def test_tcp_blocked_while_icmp_passes():
+    abroad = _abroad({"22": 10.0, "443": 12.0})
+    china = {"icmp": {"ok": True}, "ports": {"22": None, "443": None}, "tls": {}}
+    v = reach.classify(abroad, china)
+    assert v["verdict"] == "tcp_ip_blocked" and v["ports"] == ["22", "443"]
+
+
+def test_gfw_script_round_trip():
+    from app.checks import gfw
+
+    s = gfw.script({"ipv4": "203.0.113.10", "tcp_ports": [443]})
+    assert "__PARAMS__" not in s and "203.0.113.10" in s
+    compile(s, "probe", "exec")  # valid Python on the probe
+    out = gfw.parse_output('noise\nGFWJSON{"python": true, "icmp4": {"ok": true}}\n')
+    assert out == {"python": True, "icmp4": {"ok": True}}
+    assert gfw.parse_output("nothing") is None
+
+
+def test_gfw_matrix_iij_case():
+    """IPv4 TCP dropped from China on every port, ICMP passes, UDP lossy, IPv6 fine, Cloudflare fine."""
+    from app.checks import gfw
+
+    abroad = {"icmp4": {"ok": True, "avg": 110, "loss": 0},
+              "tcp4": {"28650": {"state": "open", "ms": 110}, "45111": {"state": "refused", "ms": 110}},
+              "udp4": {"28654": {"sent": 20, "replies": 20, "refused": False}}}
+    china = {"python": True, "icmp4": {"ok": True, "avg": 60, "loss": 5},
+             "tcp4": {"28650": {"state": "timeout", "ms": None}, "45111": {"state": "timeout", "ms": None}},
+             "udp4": {"28654": {"sent": 20, "replies": 6, "refused": False}},
+             "ipv6_capable": True, "tcp6": {"28650": {"state": "open", "ms": 120}},
+             "cf": {"edge_status": 200, "origin_status": 404, "colo": "LAX", "loc": "CN", "speed_kbps": 3400}}
+    m = gfw.matrix(abroad, china)
+    by = {r["test"]: r for r in m["rows"]}
+    assert by["icmp4"]["verdict"] == "ok"
+    assert by["tcp4"]["verdict"] == "ip_blocked" and by["tcp4"]["ports"] == ["28650", "45111"]
+    assert by["udp4"]["verdict"] == "lossy" and by["udp4"]["loss"] == 70.0
+    assert by["tcp6"]["verdict"] == "ok" and by["cf"]["verdict"] == "ok"
+    assert m["advice"][:2] == ["advice.use_ipv6", "advice.use_cf"]
+    assert "advice.udp_poor" in m["advice"] and "advice.cf_slow" in m["advice"]
+
+
+def test_gfw_matrix_without_probe_and_origin_error():
+    from app.checks import gfw
+
+    assert gfw.matrix({"icmp4": {"ok": True}}, None)["advice"] == ["advice.no_probe"]
+    china = {"python": True, "tcp4": {"443": {"state": "open"}}, "cf": {"edge_status": 200, "origin_status": 522}}
+    m = gfw.matrix({"tcp4": {"443": {"state": "open"}}}, china)
+    assert {r["test"]: r["verdict"] for r in m["rows"]} == {"tcp4": "ok", "cf": "origin_unreachable"}
+    assert "advice.cf_origin" in m["advice"]
+
+
+def test_ipv6_validation():
+    import pytest
+
+    from app import validation as v
+
+    assert v.ipv6("") == "" and v.ipv6("[2606:4700::1111]") == "2606:4700::1111"
+    for bad in ("fd42:43::50", "::1", "203.0.113.1", "nonsense"):
+        with pytest.raises(v.InvalidInput):
+            v.ipv6(bad)

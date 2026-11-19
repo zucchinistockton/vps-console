@@ -42,6 +42,15 @@
     {% endif %}
   </details>
 
+  <details open>
+    <summary>{{ t('check.gfw') }}</summary>
+    <label class="check"><input type="checkbox" name="gfw" value="1" checked> {{ t('check.gfw_on') }}</label>
+    <label>{{ t('field.udp_ports') }}<input name="udp_ports" inputmode="numeric" placeholder="28654, 443" value="{{ form.get('udp_ports', '') }}" data-remember></label>
+    <label>{{ t('field.ipv6') }}<input name="ipv6" autocomplete="off" placeholder="2001:db8::10" value="{{ form.get('ipv6', '') }}" data-remember></label>
+    <label>{{ t('field.cf_host') }}<input name="cf_host" autocomplete="off" placeholder="cdn.example.com" value="{{ form.get('cf_host', '') }}" data-remember></label>
+    <p class="hint">{{ t('check.gfw_hint') }}</p>
+  </details>
+
   <details>
     <summary>{{ t('check.cloudflare') }}</summary>
     <label>{{ t('field.domain') }}<input name="domain" placeholder="node.example.com" value="{{ form.get('domain', '') }}" data-remember></label>

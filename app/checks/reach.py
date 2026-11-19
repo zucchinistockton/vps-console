@@ -112,6 +112,9 @@ def classify(abroad: dict, china: dict | None, tls_abroad: dict | None = None) -
     blocked = sorted(abroad_open - china_open, key=int)
     if abroad_open and not china_open and not china_icmp:
         return {"verdict": "ip_blocked", "ports": blocked}
+    if abroad_open and not china_open and china_icmp:
+        # ICMP passes but every TCP port is dropped: the GFW blocks TCP to the whole IP (seen 2026-11)
+        return {"verdict": "tcp_ip_blocked", "ports": blocked}
     if blocked:
         return {"verdict": "port_blocked", "ports": blocked, "closed": closed}
     cut = sorted((p for p, state in china.get("tls", {}).items()
